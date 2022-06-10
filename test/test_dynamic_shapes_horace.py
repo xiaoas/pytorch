@@ -126,63 +126,15 @@ class ShapeEnv(object):
         return concrete_val
 
 
-def create_contiguous(shape):
-    if len(shape) == 0:
-        return []
-    strides = [1]
-    for dim in reversed(shape[:-1]):
-        strides.append(dim * strides[-1])
-    return list(reversed(strides))
-
-class FakeSymbolicTensor(torch.Tensor):
-    @staticmethod
-    def __new__(cls, sym_shape, sym_strides, dtype, layout, requires_grad, device):
-        # sym_strides doesn't work yet
-        # TODO: this is wrong in general
-        offset = 0
-        contiguous_strides = create_contiguous(sym_shape)
-        print(sym_shape, contiguous_strides)
-        r = torch.Tensor._make_wrapper_subclass(
-            cls, sym_shape,
-            contiguous_strides, offset,
-            dtype=dtype, layout=layout, requires_grad=requires_grad,
-            device=device
-        )
-        return r
-
-    __torch_function__ = _disabled_torch_function_impl
-
-
-    def new_empty(self, shape):
-        return FakeSymbolicTensor(shape, None, self.dtype, self.layout, self.requires_grad, self.device)
-
-    @classmethod
-    def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        if func_overload in meta_funcs:
-            return meta_funcs[func_overload](*args, **kwargs)
-
-        if func_overload == torch.ops.aten.new_empty.default:
-            self = args[0]
-            shape = args[1]
-            return FakeSymbolicTensor(shape, self.stride(), self.dtype, self.layout, self.requires_grad, self.device)
-
-        raise RuntimeError(f"operator {func_overload} not supported")
-
-
-def create_symbolic_tensor(name, arg, shape_env):
-   sym_shapes = tuple([shape_env.create_symint(f"{name}_{idx}", val) for idx, val in enumerate(arg.size())])
-   sym_strides = tuple([shape_env.create_symint(f"{name}_{idx}_stride", val) for idx, val in enumerate(arg.stride())])
-   return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
 
 from functorch import make_fx
 
 shape_env = ShapeEnv()
-x = create_symbolic_tensor("x", torch.randn(3,4,5, requires_grad=True), shape_env)
+x = torch.randn(3, 4, 5, requires_grad=True)
 
 def f(y):
     x = y * 2
     x = x.sum()
-    # x = x.expand(y.shape)
     # return x
     return torch.autograd.grad(x, y)
 
